@@ -1,0 +1,926 @@
+{
+  "name": "LinkedIn Job Alert Automation (Apify + Google Sheets)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "linkedin-job-alert",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "cb0d52f5-54ea-4641-b08b-5cf3e4006314",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        208
+      ],
+      "webhookId": "c1f0a3de-7a41-4c0a-9b0e-1b2a3c4d5e6f"
+    },
+    {
+      "parameters": {
+        "jsCode": "const b = $input.first().json.body || {};\nconst jobTitle = String(b.jobTitle || '').trim();\nconst location = String(b.location || '').trim();\nconst errors = [];\nlet limit = b.limit === undefined || b.limit === '' ? 20 : parseInt(b.limit, 10);\n\nif (!jobTitle) errors.push('jobTitle is required');\nif (!location) errors.push('location is required');\nif (!Number.isInteger(limit) || limit < 1) errors.push('limit must be a positive integer');\nif (limit > 200) limit = 200; // safety cap to control Apify cost\n\nreturn [{\n  json: {\n    valid: errors.length === 0,\n    errors,\n    jobTitle,\n    location,\n    limit,\n    // r86400 = last 24h, r604800 = last 7 days, r2592000 = last 30 days\n    publishedAt: b.publishedAt || 'r604800',\n    // Apify actor ID (use \"~\" instead of \"/\" in the API URL)\n    actorId: 'curious_coder~linkedin-jobs-scraper',\n    searchUrl: 'https://www.linkedin.com/jobs/search/?keywords=' + encodeURIComponent(jobTitle) + '&location=' + encodeURIComponent(location) + '&f_TPR=' + (b.publishedAt || 'r604800') + '&position=1&pageNum=0',\n    scrapeCount: Math.max(10, limit) // this actor needs count >= 10\n  }\n}];"
+      },
+      "id": "391661ef-e398-4131-86e8-2abaa6aec059",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c-valid",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ddb0046f-0dda-4cfe-814e-9921bca515d0",
+      "name": "Input Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'error', errors: $json.errors }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "f0654a4c-f05f-43ec-8605-f7d472b2c714",
+      "name": "Respond 400 Bad Request",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        688,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'accepted', message: 'Scraping started. Results will be saved to Google Sheets.', jobTitle: $json.jobTitle, location: $json.location, limit: $json.limit }) }}",
+        "options": {
+          "responseCode": 202
+        }
+      },
+      "id": "fc74dcb2-9054-449d-a15b-0151b2447f28",
+      "name": "Respond 202 Accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        688,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.apify.com/v2/acts/{{ $('Validate Input').first().json.actorId }}/runs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ urls: [ $('Validate Input').first().json.searchUrl ], count: $('Validate Input').first().json.scrapeCount, scrapeCompany: false }) }}",
+        "options": {}
+      },
+      "id": "a387e1d3-1008-4c26-a07b-b7b2567ca1b3",
+      "name": "Start Apify Run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        896,
+        128
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ku856rZgNJItyOfc",
+          "name": "Header Auth account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "amount": 20
+      },
+      "id": "397e8958-71f9-4330-99ba-bc6e3d70fa23",
+      "name": "Wait 20s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1120,
+        128
+      ],
+      "webhookId": "9d2b7c1e-3f55-4e0a-8a11-0c7d6e5f4a3b"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.apify.com/v2/actor-runs/{{ $('Start Apify Run').first().json.data.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "fa830685-0f94-468f-b37a-539366aaa74d",
+      "name": "Check Run Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1344,
+        128
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ku856rZgNJItyOfc",
+          "name": "Header Auth account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const run = $input.first().json.data || {};\nconst status = run.status;\nconst MAX_WAIT_MS = 15 * 60 * 1000; // give up after 15 minutes\nlet route = 'wait';\nlet reason = '';\n\nif (status === 'SUCCEEDED') {\n  route = 'success';\n} else if (['FAILED', 'ABORTED', 'TIMED-OUT'].includes(status)) {\n  route = 'failed';\n  reason = run.statusMessage || ('Apify run ended with status ' + status);\n} else if (run.startedAt && Date.now() - new Date(run.startedAt).getTime() > MAX_WAIT_MS) {\n  route = 'failed';\n  reason = 'Run did not finish within 15 minutes (last status: ' + status + ')';\n}\n\nreturn [{ json: { route, status, reason, runId: run.id, datasetId: run.defaultDatasetId } }];"
+      },
+      "id": "d14dccec-04f5-4b94-ad37-1b2456fa41a5",
+      "name": "Evaluate Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "r-success",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "success",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "success"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "r-failed",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "failed",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "failed"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "r-wait",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "wait",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "wait"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7144c600-e4ed-4942-bc6e-d5461efbaae7",
+      "name": "Route by Status",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1776,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.apify.com/v2/datasets/{{ $json.datasetId }}/items",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "format",
+              "value": "json"
+            },
+            {
+              "name": "clean",
+              "value": "true"
+            },
+            {
+              "name": "limit",
+              "value": "={{ $('Validate Input').first().json.limit }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "72bbe1af-8ea2-4256-bd06-0e4983207b27",
+      "name": "Fetch Dataset",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2016,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ku856rZgNJItyOfc",
+          "name": "Header Auth account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const clean = v => (v === undefined || v === null) ? '' : String(v).trim();\nconst noQuery = u => clean(u).split('?')[0]; // drop LinkedIn tracking params\nconst seen = new Set();\nconst out = [];\n\nfor (const item of $input.all()) {\n  const j = item.json;\n  const url = noQuery(j.link || j.jobUrl || j.url || j.applyUrl);\n  const title = clean(j.title || j.jobTitle);\n  if (!url || !title || seen.has(url)) continue; // skip junk + duplicates\n  seen.add(url);\n  out.push({\n    json: {\n      'Job Title': title,\n      'Company Name': clean(j.companyName || j.company),\n      'Location': clean(j.location),\n      'Posted Time': clean(j.postedAt || j.postedTime || j.timeAgo || j.postedText || j.publishedAt),\n      'Job URL': url,\n      'Company URL': noQuery(j.companyLinkedinUrl || j.companyUrl), // empty if not available\n      'Scraped At': new Date().toISOString()\n    }\n  });\n}\nreturn out;"
+      },
+      "id": "e939c563-8efa-4582-a4d9-fc8a3b3f2333",
+      "name": "Process Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1PxCmvI5uC1qArehxNQHAA13q-S5ggRK3XESa1LIPsHs",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Jobs",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Job Title": "={{ $json['Job Title'] }}",
+            "Company Name": "={{ $json['Company Name'] }}",
+            "Location": "={{ $json['Location'] }}",
+            "Posted Time": "={{ $json['Posted Time'] }}",
+            "Job URL": "={{ $json['Job URL'] }}",
+            "Company URL": "={{ $json['Company URL'] }}",
+            "Scraped At": "={{ $json['Scraped At'] }}"
+          },
+          "matchingColumns": [
+            "Job URL"
+          ],
+          "schema": [
+            {
+              "id": "Job Title",
+              "displayName": "Job Title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Company Name",
+              "displayName": "Company Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Location",
+              "displayName": "Location",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Posted Time",
+              "displayName": "Posted Time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Job URL",
+              "displayName": "Job URL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Company URL",
+              "displayName": "Company URL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Scraped At",
+              "displayName": "Scraped At",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "cc087e5f-a96d-4325-b934-96dafa0c5037",
+      "name": "Save Jobs to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2464,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "nRCY220gp7HGf6un",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $('Process Data').all().map(i => i.json);\nconst top = (key, n = 5) => {\n  const m = {};\n  rows.forEach(r => { const v = r[key]; if (v) m[v] = (m[v] || 0) + 1; });\n  return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, n)\n    .map(([k, v]) => k + ' (' + v + ')').join(', ');\n};\nconst search = $('Validate Input').first().json;\nconst titles = rows.slice(0, 15).map(r => r['Job Title']).join('; ');\n\nconst prompt =\n  'You are a recruitment analyst. Using the data below, write a 2-3 sentence summary that highlights: ' +\n  '(1) the most common hiring companies, (2) the most common locations, (3) any noticeable hiring trends. ' +\n  'Be concise and factual. Do not invent numbers.\\n\\n' +\n  'Search: \"' + search.jobTitle + '\" in \"' + search.location + '\"\\n' +\n  'Total jobs: ' + rows.length + '\\n' +\n  'Top companies: ' + top('Company Name') + '\\n' +\n  'Top locations: ' + top('Location') + '\\n' +\n  'Sample job titles: ' + titles;\n\nreturn [{ json: { prompt, total: rows.length } }];"
+      },
+      "id": "4be4820b-780c-4842-abf4-5e05fa2b1c70",
+      "name": "Prepare AI Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2688,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.prompt }}"
+      },
+      "id": "80f58024-e4ec-48aa-8fc8-23c1cb4c139a",
+      "name": "AI Job Summary",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        2896,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "7fda23c6-8bd9-4069-b1ae-f3ba6e5de295",
+      "name": "Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        2928,
+        208
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": null,
+          "name": "",
+          "__aiGatewayManaged": true
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1PxCmvI5uC1qArehxNQHAA13q-S5ggRK3XESa1LIPsHs",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Summaries",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "={{ new Date().toISOString() }}",
+            "Search": "={{ $('Validate Input').first().json.jobTitle + ' | ' + $('Validate Input').first().json.location }}",
+            "Total Jobs": "={{ $('Prepare AI Prompt').first().json.total }}",
+            "Summary": "={{ $json.text }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Date",
+              "displayName": "Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "Search",
+              "displayName": "Search",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "Total Jobs",
+              "displayName": "Total Jobs",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "Summary",
+              "displayName": "Summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d5874c8b-d3b7-4963-aea9-38407e56b52d",
+      "name": "Save Summary to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3264,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "nRCY220gp7HGf6un",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $input.first().json;\nconst reason = j.reason\n  || (j.error && (j.error.message || JSON.stringify(j.error)))\n  || j.message\n  || 'Unknown error';\nlet search = '';\ntry {\n  const s = $('Validate Input').first().json;\n  search = s.jobTitle + ' | ' + s.location + ' | ' + s.limit;\n} catch (e) {}\n\nreturn [{ json: {\n  time: new Date().toISOString(),\n  runId: j.runId || '',\n  status: j.status || 'REQUEST_FAILED',\n  reason,\n  search\n} }];"
+      },
+      "id": "8fecad70-8b20-420b-b7a5-0b9bede56096",
+      "name": "Build Failure Info",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1PxCmvI5uC1qArehxNQHAA13q-S5ggRK3XESa1LIPsHs",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Errors",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Time": "={{ $json.time }}",
+            "Run ID": "={{ $json.runId }}",
+            "Status": "={{ $json.status }}",
+            "Reason": "={{ $json.reason }}",
+            "Search": "={{ $json.search }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Time",
+              "displayName": "Time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "Run ID",
+              "displayName": "Run ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "Reason",
+              "displayName": "Reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "Search",
+              "displayName": "Search",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "08337469-31e9-4bb1-aac5-14d30577a50d",
+      "name": "Log Failed Run",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2240,
+        384
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "nRCY220gp7HGf6un",
+          "name": "Google Sheets account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "errorMessage": "={{ 'Apify scraping failed (' + $('Build Failure Info').first().json.status + '): ' + $('Build Failure Info').first().json.reason }}"
+      },
+      "id": "ded01423-4d60-4ea4-b4e7-a0df8e7b582e",
+      "name": "Stop and Error",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        2464,
+        384
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "Input Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Input Valid?": {
+      "main": [
+        [
+          {
+            "node": "Respond 202 Accepted",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 400 Bad Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond 202 Accepted": {
+      "main": [
+        [
+          {
+            "node": "Start Apify Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start Apify Run": {
+      "main": [
+        [
+          {
+            "node": "Wait 20s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 20s": {
+      "main": [
+        [
+          {
+            "node": "Check Run Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Run Status": {
+      "main": [
+        [
+          {
+            "node": "Evaluate Status",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate Status": {
+      "main": [
+        [
+          {
+            "node": "Route by Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Status": {
+      "main": [
+        [
+          {
+            "node": "Fetch Dataset",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Info",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 20s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Dataset": {
+      "main": [
+        [
+          {
+            "node": "Process Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Data": {
+      "main": [
+        [
+          {
+            "node": "Save Jobs to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Jobs to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Prepare AI Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare AI Prompt": {
+      "main": [
+        [
+          {
+            "node": "AI Job Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Job Summary": {
+      "main": [
+        [
+          {
+            "node": "Save Summary to Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Job Summary",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Failure Info": {
+      "main": [
+        [
+          {
+            "node": "Log Failed Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Failed Run": {
+      "main": [
+        [
+          {
+            "node": "Stop and Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "1e85b1f1-a125-498f-8588-bb22fcc04ff2",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "850926f9b1952985daae297cef31984ab2646f4ef4d7da22c1a32b7bde859c0f"
+  },
+  "nodeGroups": [],
+  "id": "OL39slZdmspdBOI3",
+  "tags": []
+}
