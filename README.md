@@ -5,15 +5,19 @@ An n8n workflow that accepts a job search request via **Webhook**, scrapes Linke
 ## Flow
 
 ```
-Webhook → Validate Input → Valid? ─no→ Respond 400
-                             │yes
-                     Respond 202 → Start Apify Run → Wait 20s → Check Run Status → Evaluate Status → Route
-                                                         ▲                                              │
-                                                         └────────────── still running ─────────────────┤
-                                                                                                        │ SUCCEEDED
-                       Fetch Dataset → Process Data → Save Jobs (Sheets) → Prepare AI Prompt → AI Summary → Save Summary
-                                                                                                        │ FAILED / ABORTED / TIMED-OUT / >15 min
-                                                                          Build Failure Info → Log Failed Run (Errors tab) → Stop and Error
+Webhook → Validate Input → Input Valid? ─ no ─► Respond 400
+                              │ yes
+                   Respond 202 → Start Apify Run
+                              ▼
+        ┌──► Wait 20s → Check Run Status → Evaluate Status → Route by Status
+        │                                                      │
+        └────────────────── still running ─────────────────────┤
+                                                               │ SUCCEEDED
+   Fetch Dataset → Process Data → Save Jobs (Sheet)
+        → Prepare AI Prompt → AI Job Summary → Save Summary (Sheet)
+
+   FAILED / ABORTED / TIMED-OUT / over 15 minutes
+        → Build Failure Info → Log Failed Run → Stop and Error
 ```
 
 ## 1. Prerequisites
@@ -112,6 +116,10 @@ Optional field: `"publishedAt"`: `"r86400"` (last 24 h), `"r604800"` (last 7 day
 - LinkedIn scrapers usually need Apify residential proxies; this may require a paid Apify plan or credits. If runs fail with a proxy/blocked message, check the run log in Apify Console.
 - Apify actors can change their input/output fields or become unavailable. Re-check the actor page if the run output looks different.
 - If the dataset is empty (no jobs match), the workflow ends quietly without writing rows.
+
+## Screenshots
+
+![Final Google Sheet - Jobs tab](screenshots/final-sheet.png)
 
 ## Deliverables
 
